@@ -1,0 +1,64 @@
+%Dictionaries mapping E. coli metabolites to Syn metabolites:
+DICT = DICT_exact;
+BATCH_SIZE = 1; % # of reactions at a time
+BOUND_L = -100; % default lower bound for new reactions
+BOUND_U = 100; % default upper bound for new reactions
+ecModel = EcAer;
+synModel = synAn;
+
+%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Initialize:
+rxnStart = 1;
+rxnEnd = BATCH_SIZE;
+nRxns = length(EcAer.rxns);
+terminator = 0;
+changeCobraSolver('glpk');
+
+savedReactionInds = zeros(0, 2);
+savedGrowthRates = zeros(0,1);
+
+COUNTER = 1;
+
+while true
+    % Check if we are at the end of the list of reactions, and set the
+    % terminator if we are:
+    if rxnEnd > nRxns
+        rxnEnd = nRxns;
+        terminator = 1;
+    end
+    
+    synModelTest = synModel;
+    newRxns = {};
+    
+    for i = rxnStart : rxnEnd
+        [addedRxns synModelTest] = addEcRxnToSyn(ecModel, synModelTest, DICT, ...
+            i, BOUND_L, BOUND_U, 0, 0);
+        newRxns = [newRxns; addedRxns];
+    end
+    
+    % We now have the "fortified" synAn model. Check if it grows:
+    sol = optimizeCbModel(synModelTest);
+    if sol.f > 0.0001
+        dim = size(savedReactionInds);
+        savedReactionInds(dim(1)+1, :) = [rxnStart rxnEnd];
+        savedGrowthRates(length(savedGrowthRates)+1, 1) = sol.f;
+    end
+    
+    % Check if we're done. If not, increment the reaction set:
+    if terminator
+        dim = size(savedReactionInds);
+        fprintf('\n %i sets of reactions that confer anaerobic growth \n', dim(1))
+        
+        fprintf('%6s %5s %s \n', 'Start', 'End', 'f');
+            
+        for j = 1:dim(1)
+            fprintf('%6i %5i %f \n', savedReactionInds(j,1), savedReactionInds(j,2), ...
+                savedGrowthRates(j));
+        end
+        break
+    else
+        rxnStart = rxnStart + BATCH_SIZE;
+        rxnEnd = rxnEnd + BATCH_SIZE;
+    end
+end
